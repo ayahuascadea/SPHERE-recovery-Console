@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  :root {
+    --bg: #0a0a0a;
+    --surface: #141414;
+    --border: #262626;
+    --accent: #ebff00;
+    --text-main: #ffffff;
+    --text-dim: #888888;
+    
+    /* Functional shades */
+    --danger: #ff4b4b;
+    --success: #4caf50;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text-main);
+    @apply font-sans;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6 flex flex-col;
+  }
+
+  .card-title {
+    @apply text-[11px] text-[var(--text-dim)] uppercase tracking-[1px] mb-4 font-bold;
+  }
+
+  .stat-value {
+    @apply text-3xl font-bold font-mono;
+  }
+
+  .input-base {
+    @apply w-full p-3 bg-transparent border border-[var(--border)] rounded-lg text-white text-xs font-mono outline-none transition-all placeholder:text-[var(--text-dim)] focus:border-[var(--accent)];
+  }
+
+  .btn-primary {
+    @apply w-full p-3.5 rounded-lg text-sm font-bold cursor-pointer transition-all bg-[var(--accent)] text-[#000] hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply w-full p-3.5 rounded-lg text-sm font-bold border border-[var(--border)] text-[var(--text-main)] transition-all hover:bg-[var(--border)] active:scale-[0.98];
+  }
+
+  .nav-item {
+    @apply text-sm font-medium text-[var(--text-dim)] flex items-center gap-3 cursor-pointer transition-colors p-2 rounded-lg hover:text-[var(--text-main)];
+  }
+
+  .nav-item.active {
+    @apply text-[var(--text-main)] bg-[var(--border)]/30;
+  }
+
+  .priority-pill {
+    @apply text-[10px] px-2 py-1 rounded bg-white/5 text-[var(--text-dim)] uppercase font-bold;
+  }
+}
+
+.progress-circle-conic {
+  background: conic-gradient(var(--accent) var(--progress-pct), var(--border) 0);
+}
+
+.dot-pulse {
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.logbox::-webkit-scrollbar {
+  width: 4px;
+}
+.logbox::-webkit-scrollbar-track {
+  background: var(--surface);
+}
+.logbox::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
