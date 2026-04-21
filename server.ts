@@ -161,7 +161,7 @@ async function startServer() {
       setTimeout(() => {
         client.destroy();
         reject(new Error('Electrum Timeout'));
-      }, 5000);
+      }, 10000);
     });
   }
 

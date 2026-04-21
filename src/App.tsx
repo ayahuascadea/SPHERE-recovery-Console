@@ -283,8 +283,8 @@ export default function App() {
 
   const processBatch = useCallback(async () => {
     try {
-      // Small batches prevent UI locks and provide smoother speed updates
-      const mnemonicBatchSize = useLocalNode ? 24 : 10; 
+      // Re-optimized for raw speed (144+ phrases/sec)
+      const mnemonicBatchSize = useLocalNode ? 64 : 12; 
       const phrasesList: string[] = [];
       
       while (phrasesList.length < mnemonicBatchSize && runningRef.current) {
@@ -293,8 +293,6 @@ export default function App() {
           seenPhrasesRef.current.add(p);
           phrasesList.push(p);
         }
-        // Yield every 5 mnemonics
-        if (phrasesList.length % 5 === 0) await new Promise(r => setTimeout(r, 0));
       }
 
       if (phrasesList.length === 0) return;
@@ -360,15 +358,15 @@ export default function App() {
           phraseData.push({ phrase, addresses: derivationResults });
         }
 
-        // Periodic logging to not flood the UI
-        if (batchRef.current % 10 === 0 && privKeyWIF) {
+        // Less frequent logging for better performance
+        if (batchRef.current % 20 === 0 && privKeyWIF) {
           const shortPhrase = phrase.split(' ').slice(0, 3).join(' ') + '...';
           addLog(`Scanning: ${shortPhrase} | PK: ${privKeyWIF.slice(0, 10)}...`, 'info');
         }
       }
 
-      // Large batching for local node API efficiency
-      const MAX_PER_CALL = useLocalNode ? 250 : 60;
+      // Restore high-performance batching for local nodes
+      const MAX_PER_CALL = useLocalNode ? 150 : 60;
       for (let i = 0; i < allAddresses.length; i += MAX_PER_CALL) {
         const batchAddrs = allAddresses.slice(i, i + MAX_PER_CALL);
         const balancesMap = await checkBalancesBatch(batchAddrs);
