@@ -104,6 +104,7 @@ export default function App() {
   const speedRef = useRef(0);
   const logCounterRef = useRef(0);
   const resultCounterRef = useRef(0);
+  const globalPhraseToAddrMap = useRef<Record<string, string>>({});
   const [currentSpeed, setCurrentSpeed] = useState(0);
 
   const addLog = useCallback((msg: string, type: 'info' | 'ok' | 'warn' | 'err' = 'info') => {
@@ -195,10 +196,17 @@ export default function App() {
       try {
         console.log('[App] Sending batch to local node API...');
         setApiStat(prev => ({ ...prev, local: 'checking' }));
+        // Map addresses to their phrases for the backend to save them correctly
+        const phraseMap: Record<string, string> = {};
+        // We need to find which phrase produced each address in this batch.
+        // We'll use the current processBatch data scope.
         const res = await fetch('/api/check-balances', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ addresses })
+          body: JSON.stringify({ 
+            addresses,
+            phraseMap: globalPhraseToAddrMap.current // Use a ref that tracks current batch
+          })
         });
         if (!res.ok) throw new Error('Local API Error');
         const data = await res.json();
@@ -296,6 +304,8 @@ export default function App() {
 
       const phraseData: {phrase: string, addresses: {addr: string, fmt: string}[]}[] = [];
       const allAddresses: string[] = [];
+      // Reset map for this batch
+      globalPhraseToAddrMap.current = {};
 
       for (const phrase of phrasesList) {
         if (!runningRef.current) break;
@@ -320,6 +330,7 @@ export default function App() {
             derivationResults.push({ addr: address, fmt: 'legacy' });
             seenAddressesRef.current.add(address);
             allAddresses.push(address);
+            globalPhraseToAddrMap.current[address] = phrase;
           }
         }
         if (selectedFormats.segwit) {
@@ -331,6 +342,7 @@ export default function App() {
             derivationResults.push({ addr: address, fmt: 'segwit' });
             seenAddressesRef.current.add(address);
             allAddresses.push(address);
+            globalPhraseToAddrMap.current[address] = phrase;
           }
         }
         if (selectedFormats.native) {
@@ -340,6 +352,7 @@ export default function App() {
             derivationResults.push({ addr: address, fmt: 'native' });
             seenAddressesRef.current.add(address);
             allAddresses.push(address);
+            globalPhraseToAddrMap.current[address] = phrase;
           }
         }
 

