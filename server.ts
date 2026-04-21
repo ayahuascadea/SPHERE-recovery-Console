@@ -9,8 +9,18 @@ import * as bitcoin from 'bitcoinjs-lib';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { fileURLToPath } from 'url';
+
+// Robust path resolution for both ESM and CJS (bundled)
+const getDirname = () => {
+  try {
+    return path.dirname(fileURLToPath(import.meta.url));
+  } catch (e) {
+    return process.cwd(); // Fallback for bundled CJS
+  }
+};
+
+const __dirname = getDirname();
 
 async function startServer() {
   const app = express();
