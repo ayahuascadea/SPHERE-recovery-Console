@@ -383,7 +383,6 @@ export default function App() {
             checkedRef.current++;
             speedRef.current++;
             setCheckedCount(checkedRef.current);
-            // ... rest remains same ...
 
             const bal = balancesMap[addr] ?? 0;
             const isMatch = targetAddr ? addr === targetAddr : false;
@@ -420,6 +419,8 @@ export default function App() {
     } catch (e: any) {
       console.error('Batch error:', e);
       addLog(`Error: ${e?.message || 'Check connection'}`, 'err');
+    } finally {
+      isProcessingRef.current = false;
     }
   }, [useLocalNode, wordCount, knownWords, parallel, selectedFormats, targetAddr, delay, checkBalancesBatch, checkBalance, generateValidMnemonic, addLog]);
 ;
