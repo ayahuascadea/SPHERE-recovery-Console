@@ -3,19 +3,21 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "bin": "./server.ts",
+  "bin": "./dist-server/server.cjs",
   "pkg": {
     "assets": [
-      "dist/**/*",
-      "node_modules/tiny-secp256k1/**/*"
+      "dist/**/*"
     ],
     "targets": [
       "node18-win-x64"
-    ]
+    ],
+    "outputPath": "build"
   },
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
+    "build:server": "esbuild server.ts --bundle --platform=node --format=cjs --outfile=dist-server/server.cjs --external:express --external:bitcoinjs-lib --external:tiny-secp256k1",
+    "build:exe": "npm run build && npm run build:server && pkg .",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
@@ -46,6 +48,7 @@
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
+    "esbuild": "^0.28.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
