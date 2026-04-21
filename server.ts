@@ -96,7 +96,7 @@ async function startServer() {
     }
   });
 
-  // Helper for Electrum TCP (One connection per address)
+  // Helper for Electrum TCP (One connection per address) - Tuned for high stability
   async function getElectrumBalance(host: string, port: number, address: string): Promise<number> {
     let scriptHash = '';
     try {
@@ -116,6 +116,7 @@ async function startServer() {
 
     return new Promise((resolve, reject) => {
       const client = new net.Socket();
+      client.setTimeout(20000); // 20s socket timeout
       let response = '';
 
       client.connect(port, host, () => {
@@ -131,10 +132,19 @@ async function startServer() {
       client.on('data', (data) => {
         response += data.toString();
         try {
-          const parsed = JSON.parse(response);
-          client.destroy();
-          resolve((parsed.result?.confirmed || 0) + (parsed.result?.unconfirmed || 0));
-        } catch (e) {}
+          if (response.includes('\n') || response.includes('}')) {
+             const parsed = JSON.parse(response);
+             client.destroy();
+             resolve((parsed.result?.confirmed || 0) + (parsed.result?.unconfirmed || 0));
+          }
+        } catch (e) {
+          // Keep waiting for more data
+        }
+      });
+
+      client.on('timeout', () => {
+        client.destroy();
+        reject(new Error('Electrum Timeout (Socket)'));
       });
 
       client.on('error', (err) => {
@@ -142,10 +152,13 @@ async function startServer() {
         reject(err);
       });
 
+      // Extra safety timeout
       setTimeout(() => {
-        client.destroy();
-        reject(new Error('Electrum Timeout'));
-      }, 10000);
+        if (!client.destroyed) {
+          client.destroy();
+          reject(new Error('Electrum Timeout (Global)'));
+        }
+      }, 25000);
     });
   }
 
