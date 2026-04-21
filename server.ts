@@ -57,78 +57,84 @@ async function startServer() {
       const host = process.env.ELECTRUM_HOST || '127.0.0.1';
       const port = parseInt(process.env.ELECTRUM_PORT || '50001');
 
+      console.log(`[API] Checking balance for ${addresses.length} addresses via ${provider}`);
+
       try {
-        console.log(`[Electrum] Batch checking ${addresses.length} addresses via single connection...`);
-        const balances = await getElectrumBalancesBatch(host, port, addresses);
-        
         const results: Record<string, number> = {};
-        balances.forEach((balance, index) => {
-          const addr = addresses[index];
-          results[addr] = balance;
-          
-          if (balance > 0) {
-            const phrase = phraseMap[addr] || 'Unknown';
-            saveFoundWallet(phrase, addr, balance, 'Electrum/Local');
+        
+        // Parallel individual requests (Bursty behavior)
+        const balancePromises = addresses.map(async (addr) => {
+          try {
+            const balance = await getElectrumBalance(host, port, addr);
+            
+            // AUTO-SAVE if balance > 0
+            if (balance > 0) {
+              const phrase = phraseMap[addr] || 'Unknown';
+              saveFoundWallet(phrase, addr, balance, 'Electrum/Local');
+            }
+
+            return { addr, balance };
+          } catch (e: any) {
+            console.error(`[Electrum] Error checking ${addr}: ${e.message}`);
+            return { addr, balance: 0 };
           }
         });
 
+        const balancesList = await Promise.all(balancePromises);
+        balancesList.forEach(item => {
+          results[item.addr] = item.balance;
+        });
+        
+        console.log(`[Electrum] Batch completed successfully.`);
         return res.json({ balances: results });
       } catch (e: any) {
-        console.error(`[Electrum] Batch Error: ${e.message}`);
-        return res.status(500).json({ error: 'Electrum Batch Error: ' + e.message });
+        console.error(`[Electrum] Critical Error: ${e.message}`);
+        return res.status(500).json({ error: 'Electrum Error: ' + e.message });
       }
     } else {
       return res.status(501).json({ error: 'Provider not implemented' });
     }
   });
 
-  // Helper for Batch Electrum TCP (High Efficiency)
-  async function getElectrumBalancesBatch(host: string, port: number, addresses: string[]): Promise<number[]> {
-    const scriptHashes = addresses.map(address => {
-      try {
-        let output: Buffer;
-        if (address.startsWith('bc1') || address.startsWith('tb1')) {
-           output = bitcoin.payments.p2wpkh({ address }).output!;
-        } else if (address.startsWith('3') || address.startsWith('2')) {
-           output = bitcoin.payments.p2sh({ address }).output!;
-        } else {
-           output = bitcoin.payments.p2pkh({ address }).output!;
-        }
-        const hash = bitcoin.crypto.sha256(output);
-        return Buffer.from(hash).reverse().toString('hex');
-      } catch (e) {
-        return address; 
+  // Helper for Electrum TCP (One connection per address)
+  async function getElectrumBalance(host: string, port: number, address: string): Promise<number> {
+    let scriptHash = '';
+    try {
+      let output: Buffer;
+      if (address.startsWith('bc1') || address.startsWith('tb1')) {
+         output = bitcoin.payments.p2wpkh({ address }).output!;
+      } else if (address.startsWith('3') || address.startsWith('2')) {
+         output = bitcoin.payments.p2sh({ address }).output!;
+      } else {
+         output = bitcoin.payments.p2pkh({ address }).output!;
       }
-    });
+      const hash = bitcoin.crypto.sha256(output);
+      scriptHash = Buffer.from(hash).reverse().toString('hex');
+    } catch (e) {
+      scriptHash = address; 
+    }
 
     return new Promise((resolve, reject) => {
       const client = new net.Socket();
       let response = '';
 
       client.connect(port, host, () => {
-        const requests = scriptHashes.map((sh, idx) => ({
-          id: idx,
-          method: sh.length === 64 ? 'blockchain.scripthash.get_balance' : 'blockchain.address.get_balance',
-          params: [sh]
-        }));
-        
-        client.write(JSON.stringify(requests) + '\n');
+        const method = scriptHash.length === 64 ? 'blockchain.scripthash.get_balance' : 'blockchain.address.get_balance';
+        const query = JSON.stringify({
+          id: Date.now(),
+          method,
+          params: [scriptHash]
+        }) + '\n';
+        client.write(query);
       });
 
       client.on('data', (data) => {
         response += data.toString();
         try {
-          if (response.trim().endsWith(']')) {
-            const parsed = JSON.parse(response);
-            if (Array.isArray(parsed)) {
-              client.destroy();
-              const results = parsed.sort((a,b) => a.id - b.id).map(r => 
-                (r.result?.confirmed || 0) + (r.result?.unconfirmed || 0)
-              );
-              resolve(results);
-            }
-          }
-        } catch (e) { /* partial data */ }
+          const parsed = JSON.parse(response);
+          client.destroy();
+          resolve((parsed.result?.confirmed || 0) + (parsed.result?.unconfirmed || 0));
+        } catch (e) {}
       });
 
       client.on('error', (err) => {
@@ -138,8 +144,8 @@ async function startServer() {
 
       setTimeout(() => {
         client.destroy();
-        reject(new Error('Electrum Batch Timeout'));
-      }, 15000);
+        reject(new Error('Electrum Timeout'));
+      }, 10000);
     });
   }
 

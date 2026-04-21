@@ -283,8 +283,8 @@ export default function App() {
 
   const processBatch = useCallback(async () => {
     try {
-      // Re-optimized for raw speed (144+ phrases/sec)
-      const mnemonicBatchSize = useLocalNode ? 64 : 12; 
+      // Restore aggressive bursty batching as requested
+      const mnemonicBatchSize = parallel * 6; 
       const phrasesList: string[] = [];
       
       while (phrasesList.length < mnemonicBatchSize && runningRef.current) {
@@ -358,15 +358,15 @@ export default function App() {
           phraseData.push({ phrase, addresses: derivationResults });
         }
 
-        // Less frequent logging for better performance
-        if (batchRef.current % 20 === 0 && privKeyWIF) {
+        // Periodic logging to not flood the UI
+        if (batchRef.current % 5 === 0 && privKeyWIF) {
           const shortPhrase = phrase.split(' ').slice(0, 3).join(' ') + '...';
           addLog(`Scanning: ${shortPhrase} | PK: ${privKeyWIF.slice(0, 10)}...`, 'info');
         }
       }
 
-      // Restore high-performance batching for local nodes
-      const MAX_PER_CALL = useLocalNode ? 150 : 60;
+      // Restore the burst-friendly batch size for backend calls
+      const MAX_PER_CALL = useLocalNode ? 80 : 60;
       for (let i = 0; i < allAddresses.length; i += MAX_PER_CALL) {
         const batchAddrs = allAddresses.slice(i, i + MAX_PER_CALL);
         const balancesMap = await checkBalancesBatch(batchAddrs);
