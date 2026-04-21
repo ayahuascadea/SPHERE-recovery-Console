@@ -275,8 +275,8 @@ export default function App() {
 
   const processBatch = useCallback(async () => {
     try {
-      // Much larger batch for better API efficiency
-      const mnemonicBatchSize = parallel * 6; 
+      // Small batches prevent UI locks and provide smoother speed updates
+      const mnemonicBatchSize = useLocalNode ? 24 : 10; 
       const phrasesList: string[] = [];
       
       while (phrasesList.length < mnemonicBatchSize && runningRef.current) {
@@ -285,6 +285,8 @@ export default function App() {
           seenPhrasesRef.current.add(p);
           phrasesList.push(p);
         }
+        // Yield every 5 mnemonics
+        if (phrasesList.length % 5 === 0) await new Promise(r => setTimeout(r, 0));
       }
 
       if (phrasesList.length === 0) return;
@@ -305,8 +307,6 @@ export default function App() {
         const root = bip32.fromSeed(seed);
         
         const derivationResults: {addr: string, fmt: string}[] = [];
-        
-        // Derive common private key (Legacy) for display
         let privKeyWIF = '';
         try {
           const lpath = root.derivePath("m/44'/0'/0'/0/0");
@@ -319,9 +319,9 @@ export default function App() {
           if (address && !seenAddressesRef.current.has(address)) {
             derivationResults.push({ addr: address, fmt: 'legacy' });
             seenAddressesRef.current.add(address);
+            allAddresses.push(address);
           }
         }
-        
         if (selectedFormats.segwit) {
           const child = root.derivePath("m/49'/0'/0'/0/0");
           const { address } = bitcoin.payments.p2sh({ 
@@ -330,30 +330,32 @@ export default function App() {
           if (address && !seenAddressesRef.current.has(address)) {
             derivationResults.push({ addr: address, fmt: 'segwit' });
             seenAddressesRef.current.add(address);
+            allAddresses.push(address);
           }
         }
-        
         if (selectedFormats.native) {
           const child = root.derivePath("m/84'/0'/0'/0/0");
           const { address } = bitcoin.payments.p2wpkh({ pubkey: child.publicKey });
           if (address && !seenAddressesRef.current.has(address)) {
             derivationResults.push({ addr: address, fmt: 'native' });
             seenAddressesRef.current.add(address);
+            allAddresses.push(address);
           }
         }
 
         if (derivationResults.length > 0) {
           phraseData.push({ phrase, addresses: derivationResults });
-          derivationResults.forEach(d => allAddresses.push(d.addr));
-          
-          // Log the activity
+        }
+
+        // Periodic logging to not flood the UI
+        if (batchRef.current % 10 === 0 && privKeyWIF) {
           const shortPhrase = phrase.split(' ').slice(0, 3).join(' ') + '...';
-          addLog(`Checking: ${shortPhrase} | PK: ${privKeyWIF.slice(0, 10)}...`, 'info');
+          addLog(`Scanning: ${shortPhrase} | PK: ${privKeyWIF.slice(0, 10)}...`, 'info');
         }
       }
 
-      // Increase batch size for local nodes to maximize throughput
-      const MAX_PER_CALL = useLocalNode ? 150 : 60;
+      // Large batching for local node API efficiency
+      const MAX_PER_CALL = useLocalNode ? 250 : 60;
       for (let i = 0; i < allAddresses.length; i += MAX_PER_CALL) {
         const batchAddrs = allAddresses.slice(i, i + MAX_PER_CALL);
         const balancesMap = await checkBalancesBatch(batchAddrs);
