@@ -193,6 +193,7 @@ export default function App() {
     // 0. Local Node (Priority if enabled)
     if (useLocalNode) {
       try {
+        console.log('[App] Sending batch to local node API...');
         setApiStat(prev => ({ ...prev, local: 'checking' }));
         const res = await fetch('/api/check-balances', {
           method: 'POST',
@@ -202,8 +203,10 @@ export default function App() {
         if (!res.ok) throw new Error('Local API Error');
         const data = await res.json();
         setApiStat(prev => ({ ...prev, local: 'ok' }));
+        console.log('[App] Local node response received.');
         return data.balances || {};
       } catch (e) {
+        console.error('[App] Local node error:', e);
         setApiStat(prev => ({ ...prev, local: 'err' }));
         // Fallback to public if local fails? For now just try public
       }
@@ -268,7 +271,7 @@ export default function App() {
     if (bchairBalances) return bchairBalances;
 
     return {};
-  }, [timeoutMs]);
+  }, [useLocalNode, timeoutMs]);
 
   const processBatch = useCallback(async () => {
     try {
@@ -401,7 +404,7 @@ export default function App() {
       console.error('Batch error:', e);
       addLog(`Error: ${e?.message || 'Check connection'}`, 'err');
     }
-  }, [wordCount, knownWords, parallel, selectedFormats, targetAddr, delay, checkBalancesBatch, checkBalance, generateValidMnemonic, addLog]);
+  }, [useLocalNode, wordCount, knownWords, parallel, selectedFormats, targetAddr, delay, checkBalancesBatch, checkBalance, generateValidMnemonic, addLog]);
 ;
 
   useEffect(() => {
