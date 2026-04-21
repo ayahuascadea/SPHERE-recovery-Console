@@ -45,7 +45,12 @@ async function startServer() {
 
   // --- API Routes ---
 
-  // Batch Balance Check (Electrum)
+  // --- Backend Settings ---
+  const MAX_CONCURRENT_ELECTRUM = 15; // Strict limit to prevent Windows socket exhaustion
+  const ELECTRUM_TIMEOUT = 30000;      // 30s - generous for local nodes
+  const MAX_RETRIES = 5;               // More retries for stability
+
+  // High-Performance Managed Pool for Electrum
   app.post('/api/check-balances', async (req, res) => {
     const { addresses, provider = 'electrum', phraseMap = {} } = req.body;
     
@@ -57,46 +62,55 @@ async function startServer() {
       const host = process.env.ELECTRUM_HOST || '127.0.0.1';
       const port = parseInt(process.env.ELECTRUM_PORT || '50001');
 
-      console.log(`[API] Checking balance for ${addresses.length} addresses via ${provider}`);
-
       try {
         const results: Record<string, number> = {};
         
-        // Parallel individual requests (Bursty behavior)
-        const balancePromises = addresses.map(async (addr) => {
-          try {
-            const balance = await getElectrumBalance(host, port, addr);
-            
-            // AUTO-SAVE if balance > 0
-            if (balance > 0) {
-              const phrase = phraseMap[addr] || 'Unknown';
-              saveFoundWallet(phrase, addr, balance, 'Electrum/Local');
-            }
-
-            return { addr, balance };
-          } catch (e: any) {
-            console.error(`[Electrum] Error checking ${addr}: ${e.message}`);
-            return { addr, balance: 0 };
-          }
-        });
-
-        const balancesList = await Promise.all(balancePromises);
-        balancesList.forEach(item => {
-          results[item.addr] = item.balance;
-        });
+        // Process in throttled batches to keep local node healthy
+        console.log(`[API] Throttled check for ${addresses.length} addresses...`);
         
-        console.log(`[Electrum] Batch completed successfully.`);
+        for (let i = 0; i < addresses.length; i += MAX_CONCURRENT_ELECTRUM) {
+          const chunk = addresses.slice(i, i + MAX_CONCURRENT_ELECTRUM);
+          
+          const balancePromises = chunk.map(async (addr) => {
+            let attempt = 0;
+            while (attempt < MAX_RETRIES) {
+              try {
+                const balance = await getElectrumBalance(host, port, addr);
+                if (balance > 0) {
+                  const phrase = phraseMap[addr] || 'Found';
+                  saveFoundWallet(phrase, addr, balance, 'Electrum/Local');
+                }
+                return { addr, balance };
+              } catch (e: any) {
+                attempt++;
+                if (attempt >= MAX_RETRIES) {
+                  console.error(`[Electrum] Failed ${addr} after ${MAX_RETRIES} attempts: ${e.message}`);
+                  return { addr, balance: 0 };
+                }
+                // Backoff slightly before retry
+                await new Promise(r => setTimeout(r, 200 * attempt));
+              }
+            }
+            return { addr, balance: 0 };
+          });
+
+          const chunkResults = await Promise.all(balancePromises);
+          chunkResults.forEach(item => {
+            results[item.addr] = item.balance;
+          });
+        }
+        
         return res.json({ balances: results });
       } catch (e: any) {
-        console.error(`[Electrum] Critical Error: ${e.message}`);
-        return res.status(500).json({ error: 'Electrum Error: ' + e.message });
+        console.error(`[Electrum] Global Pool Error: ${e.message}`);
+        return res.status(500).json({ error: 'Electrum Pool Error' });
       }
     } else {
       return res.status(501).json({ error: 'Provider not implemented' });
     }
   });
 
-  // Helper for Electrum TCP (One connection per address) - Tuned for high stability
+  // Balanced Socket Helper with aggressive cleanup and improved JSON parsing
   async function getElectrumBalance(host: string, port: number, address: string): Promise<number> {
     let scriptHash = '';
     try {
@@ -116,13 +130,28 @@ async function startServer() {
 
     return new Promise((resolve, reject) => {
       const client = new net.Socket();
-      client.setTimeout(20000); // 20s socket timeout
       let response = '';
+      let timer: NodeJS.Timeout;
+
+      const cleanup = () => {
+        clearTimeout(timer);
+        if (!client.destroyed) {
+          client.destroy();
+          client.unref();
+        }
+      };
+
+      timer = setTimeout(() => {
+        cleanup();
+        reject(new Error('Electrum Timeout'));
+      }, ELECTRUM_TIMEOUT);
 
       client.connect(port, host, () => {
         const method = scriptHash.length === 64 ? 'blockchain.scripthash.get_balance' : 'blockchain.address.get_balance';
+        // Unique ID per request prevents collision on some nodes
+        const requestId = Math.floor(Math.random() * 1000000);
         const query = JSON.stringify({
-          id: Date.now(),
+          id: requestId,
           method,
           params: [scriptHash]
         }) + '\n';
@@ -131,34 +160,32 @@ async function startServer() {
 
       client.on('data', (data) => {
         response += data.toString();
-        try {
-          if (response.includes('\n') || response.includes('}')) {
-             const parsed = JSON.parse(response);
-             client.destroy();
-             resolve((parsed.result?.confirmed || 0) + (parsed.result?.unconfirmed || 0));
+        // Keep waiting until we get a newline or a closing brace that looks like valid JSON
+        if (response.includes('\n')) {
+          try {
+            const lines = response.split('\n');
+            for (const line of lines) {
+              if (line.trim().length === 0) continue;
+              const parsed = JSON.parse(line);
+              if (parsed.error) {
+                cleanup();
+                return reject(new Error(parsed.error.message || 'Electrum RPC Error'));
+              }
+              cleanup();
+              return resolve((parsed.result?.confirmed || 0) + (parsed.result?.unconfirmed || 0));
+            }
+          } catch (e) {
+            // Partial JSON, wait for more chunks
           }
-        } catch (e) {
-          // Keep waiting for more data
         }
-      });
-
-      client.on('timeout', () => {
-        client.destroy();
-        reject(new Error('Electrum Timeout (Socket)'));
       });
 
       client.on('error', (err) => {
-        client.destroy();
+        cleanup();
         reject(err);
       });
-
-      // Extra safety timeout
-      setTimeout(() => {
-        if (!client.destroyed) {
-          client.destroy();
-          reject(new Error('Electrum Timeout (Global)'));
-        }
-      }, 25000);
+      
+      client.on('close', () => cleanup());
     });
   }
 
