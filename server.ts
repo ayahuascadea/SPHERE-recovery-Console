@@ -1,5 +1,4 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import net from 'net';
@@ -9,17 +8,10 @@ import * as bitcoin from 'bitcoinjs-lib';
 
 dotenv.config();
 
-import { fileURLToPath } from 'url';
-
 // Robust path resolution for both ESM and CJS (bundled)
 const getDirname = () => {
-  try {
-    return path.dirname(fileURLToPath(import.meta.url));
-  } catch (e) {
-    return process.cwd(); // Fallback for bundled CJS
-  }
+  return process.cwd();
 };
-
 const __dirname = getDirname();
 
 async function startServer() {
@@ -148,13 +140,15 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
+    const { createServer } = await import('vite');
+    const vite = await createServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(__dirname, 'dist');
+    // In EXE, we just serve the static dist folder
+    const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
