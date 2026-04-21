@@ -281,10 +281,15 @@ export default function App() {
     return {};
   }, [useLocalNode, timeoutMs]);
 
+  const isProcessingRef = useRef(false);
+
   const processBatch = useCallback(async () => {
+    if (isProcessingRef.current || !runningRef.current) return;
+    isProcessingRef.current = true;
+
     try {
-      // Restore aggressive bursty batching as requested
-      const mnemonicBatchSize = parallel * 6; 
+      // Adjusted for stability: slightly smaller batches but faster cycle
+      const mnemonicBatchSize = useLocalNode ? 48 : 12; 
       const phrasesList: string[] = [];
       
       while (phrasesList.length < mnemonicBatchSize && runningRef.current) {
@@ -295,23 +300,23 @@ export default function App() {
         }
       }
 
-      if (phrasesList.length === 0) return;
+      if (phrasesList.length === 0) {
+        isProcessingRef.current = false;
+        return;
+      }
 
       batchRef.current++;
       setBatchCount(batchRef.current);
 
       const phraseData: {phrase: string, addresses: {addr: string, fmt: string}[]}[] = [];
       const allAddresses: string[] = [];
-      // Reset map for this batch
       globalPhraseToAddrMap.current = {};
 
       for (const phrase of phrasesList) {
         if (!runningRef.current) break;
 
         const seed = await bip39.mnemonicToSeed(phrase);
-        if (!bip32) {
-          throw new Error('ECC/BIP32 not initialized. Please refresh.');
-        }
+        if (!bip32) throw new Error('ECC/BIP32 not initialized');
         const root = bip32.fromSeed(seed);
         
         const derivationResults: {addr: string, fmt: string}[] = [];
@@ -358,28 +363,27 @@ export default function App() {
           phraseData.push({ phrase, addresses: derivationResults });
         }
 
-        // Periodic logging to not flood the UI
-        if (batchRef.current % 5 === 0 && privKeyWIF) {
+        if (batchRef.current % 10 === 0 && privKeyWIF) {
           const shortPhrase = phrase.split(' ').slice(0, 3).join(' ') + '...';
           addLog(`Scanning: ${shortPhrase} | PK: ${privKeyWIF.slice(0, 10)}...`, 'info');
         }
       }
 
-      // Restore the burst-friendly batch size for backend calls
-      const MAX_PER_CALL = useLocalNode ? 80 : 60;
+      // Backend batch size matches server's pool well
+      const MAX_PER_CALL = useLocalNode ? 50 : 60;
       for (let i = 0; i < allAddresses.length; i += MAX_PER_CALL) {
+        if (!runningRef.current) break;
         const batchAddrs = allAddresses.slice(i, i + MAX_PER_CALL);
         const balancesMap = await checkBalancesBatch(batchAddrs);
 
         for (const item of phraseData) {
           for (const { addr, fmt } of item.addresses) {
-            // Only update UI if address was in current batch
             if (!batchAddrs.includes(addr)) continue;
-
             setCurrentAddr(addr);
             checkedRef.current++;
             speedRef.current++;
             setCheckedCount(checkedRef.current);
+            // ... rest remains same ...
 
             const bal = balancesMap[addr] ?? 0;
             const isMatch = targetAddr ? addr === targetAddr : false;

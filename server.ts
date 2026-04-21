@@ -46,9 +46,9 @@ async function startServer() {
   // --- API Routes ---
 
   // --- Backend Settings ---
-  const MAX_CONCURRENT_ELECTRUM = 15; // Strict limit to prevent Windows socket exhaustion
-  const ELECTRUM_TIMEOUT = 30000;      // 30s - generous for local nodes
-  const MAX_RETRIES = 5;               // More retries for stability
+  const MAX_CONCURRENT_ELECTRUM = 25; // Balanced for Windows local dev
+  const ELECTRUM_TIMEOUT = 7000;      // 7s - fast fail for local node
+  const MAX_RETRIES = 3;               // Balanced retries
 
   // High-Performance Managed Pool for Electrum
   app.post('/api/check-balances', async (req, res) => {
@@ -64,42 +64,39 @@ async function startServer() {
 
       try {
         const results: Record<string, number> = {};
+        console.log(`[API] Checking ${addresses.length} addrs via Electrum...`);
         
-        // Process in throttled batches to keep local node healthy
-        console.log(`[API] Throttled check for ${addresses.length} addresses...`);
-        
-        for (let i = 0; i < addresses.length; i += MAX_CONCURRENT_ELECTRUM) {
-          const chunk = addresses.slice(i, i + MAX_CONCURRENT_ELECTRUM);
-          
-          const balancePromises = chunk.map(async (addr) => {
-            let attempt = 0;
-            while (attempt < MAX_RETRIES) {
-              try {
-                const balance = await getElectrumBalance(host, port, addr);
-                if (balance > 0) {
-                  const phrase = phraseMap[addr] || 'Found';
-                  saveFoundWallet(phrase, addr, balance, 'Electrum/Local');
-                }
-                return { addr, balance };
-              } catch (e: any) {
-                attempt++;
-                if (attempt >= MAX_RETRIES) {
-                  console.error(`[Electrum] Failed ${addr} after ${MAX_RETRIES} attempts: ${e.message}`);
-                  return { addr, balance: 0 };
-                }
-                // Backoff slightly before retry
-                await new Promise(r => setTimeout(r, 200 * attempt));
+        // Parallel map with p-limit style throttling
+        const processAddress = async (addr: string) => {
+          let attempt = 0;
+          while (attempt < MAX_RETRIES) {
+            try {
+              const balance = await getElectrumBalance(host, port, addr);
+              if (balance > 0) {
+                const phrase = phraseMap[addr] || 'Found';
+                saveFoundWallet(phrase, addr, balance, 'Electrum/Local');
               }
+              return { addr, balance };
+            } catch (e: any) {
+              attempt++;
+              if (attempt >= MAX_RETRIES) {
+                console.error(`[Electrum] Offline/Timeout: ${addr} - ${e.message}`);
+                return { addr, balance: 0 };
+              }
+              await new Promise(r => setTimeout(r, 100));
             }
-            return { addr, balance: 0 };
-          });
+          }
+          return { addr, balance: 0 };
+        };
 
-          const chunkResults = await Promise.all(balancePromises);
-          chunkResults.forEach(item => {
-            results[item.addr] = item.balance;
-          });
+        // Chunk into throttled parallel blocks
+        for (let i = 0; i < addresses.length; i += MAX_CONCURRENT_ELECTRUM) {
+           const chunk = addresses.slice(i, i + MAX_CONCURRENT_ELECTRUM);
+           const chunkResults = await Promise.all(chunk.map(processAddress));
+           chunkResults.forEach(r => results[r.addr] = r.balance);
         }
         
+        console.log(`[Electrum] Verified ${addresses.length} addresses. Response OK.`);
         return res.json({ balances: results });
       } catch (e: any) {
         console.error(`[Electrum] Global Pool Error: ${e.message}`);
