@@ -39,9 +39,13 @@ async function startServer() {
       return res.status(400).json({ error: 'Addresses array required' });
     }
 
+    console.log(`[API] Checking balance for ${addresses.length} addresses via ${provider}`);
+
     if (provider === 'electrum') {
       const host = process.env.ELECTRUM_HOST || '127.0.0.1';
       const port = parseInt(process.env.ELECTRUM_PORT || '50001');
+
+      console.log(`[Electrum] Connecting to ${host}:${port}...`);
 
       try {
         const results: Record<string, number> = {};
@@ -51,8 +55,8 @@ async function startServer() {
           try {
             const balance = await getElectrumBalance(host, port, addr);
             return { addr, balance };
-          } catch (e) {
-            console.error(`Error checking ${addr}:`, e);
+          } catch (e: any) {
+            console.error(`[Electrum] Error checking ${addr}: ${e.message}`);
             return { addr, balance: 0 };
           }
         });
@@ -62,8 +66,10 @@ async function startServer() {
           results[item.addr] = item.balance;
         });
         
+        console.log(`[Electrum] Batch completed successfully.`);
         return res.json({ balances: results });
       } catch (e: any) {
+        console.error(`[Electrum] Critical Error: ${e.message}`);
         return res.status(500).json({ error: 'Electrum Error: ' + e.message });
       }
     } else {
