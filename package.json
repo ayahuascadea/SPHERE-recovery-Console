@@ -3,6 +3,16 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "bin": "./server.ts",
+  "pkg": {
+    "assets": [
+      "dist/**/*",
+      "node_modules/tiny-secp256k1/**/*"
+    ],
+    "targets": [
+      "node18-win-x64"
+    ]
+  },
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
